@@ -1,0 +1,27 @@
+/* ===== 场景切换 ===== */
+.scene-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  top: 0; left: 0;
+  z-index: -1;
+}
+
+.desk-scene, .reader-scene {
+  transition: opacity 0.5s ease;
+}
+
+/* 全屏过渡遮罩 */
+.scene-transition-mask {
+  position: fixed;
+  inset: 0;
+  background: #f5edd8;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.scene-transition-mask.active {
+  opacity: 1;
+  pointer-events: all;
+}

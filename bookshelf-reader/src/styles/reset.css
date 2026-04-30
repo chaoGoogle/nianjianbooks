@@ -1,0 +1,89 @@
+/* ===== 全局重置 ===== */
+*, *::before, *::after { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0;
+  /* 禁止鼠标选中 */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* ===== Android 浏览器缩放适配 ===== */
+html {
+  height: 100%;
+  overflow: hidden;
+  /* 阻止 Android 浏览器在输入框聚焦时自动缩放 */
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* 使用 JS 计算的 --vh 变量作为 fallback，解决 Android 地址栏导致的高度问题 */
+body {
+  /* 默认值，JS 会覆盖 — CSS 通过 calc(var(--vh, 1vh) * 100) 引用此变量 */
+  --vh: 1vh;
+}
+
+/* 确保 #app 根容器占满整个视口高度，避免子场景因父级高度塌陷而露出 body 黑色背景 */
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+/* 禁用所有可点击元素的聚焦边框和点击高亮 */
+*:focus {
+  outline: none !important;
+}
+
+*:active {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 禁用所有元素的轮廓 */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-focus-ring-color: transparent;
+}
+
+/* 显式处理所有按钮和可交互元素 */
+button, .book-card, .book-body, .book-cover, .close-btn, .toc-btn, .refresh-btn, 
+.video-trigger-btn, .video-play-pause-btn, .video-pip-btn,
+.book-video-item, input, a, select, textarea {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-focus-ring-color: transparent !important;
+}
+
+/* 允许输入框和文本区域可选择 */
+input, textarea {
+  -webkit-user-select: auto;
+  -moz-user-select: auto;
+  -ms-user-select: auto;
+  user-select: auto;
+}
+
+body {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Serif SC', serif;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  /* 使用 JS 计算的 --vh 变量，解决 Android 地址栏导致的视口高度变化问题 */
+  min-height: calc(var(--vh, 1vh) * 100);
+  max-height: -webkit-fill-available;
+  background: #0d0805;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  /* 阻止 Android 双指缩放和意外滚动 */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  cursor: crosshair;
+}
+
+/* ===== 页面内容等比缩放变量 ===== */
+/* --page-scale 由 JS 在运行时根据视口高度动态设置（computePageScale），
+   当窗口较小时自动缩小字体和间距，防止底部文字被裁剪。
+   默认值为 1 表示不缩放。 */
+:root {
+  --page-scale: 1;
+}

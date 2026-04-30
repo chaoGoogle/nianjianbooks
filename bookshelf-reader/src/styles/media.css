@@ -1,0 +1,265 @@
+/* ===== media.css ===== */
+
+/* ===== 响应式媒体查询 ===== */
+
+/* ===== 平板适配 ===== */
+@media (max-width: 1200px) {
+  .reader-topbar {
+    padding: 0 16px;
+    gap: 10px;
+  }
+
+  .reader-info {
+    margin: 0 10px;
+    padding: 8px 12px;
+  }
+
+  .reader-title {
+    font-size: 14px;
+    letter-spacing: 2px;
+  }
+
+  .reader-page {
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  .video-trigger-btn {
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .book-video-layer {
+    padding: 0;
+  }
+}
+
+/* ===== 手机适配 ===== */
+@media (max-width: 640px) {
+  .book-video-layer {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  /* 移动端伪画中画窗口适配 */
+  .fake-pip-container {
+    width: 280px;
+    border-radius: 12px;
+  }
+
+  .fake-pip-header {
+    padding: 3px 8px;
+  }
+
+  .fake-pip-title {
+    font-size: 11px;
+  }
+
+  .fake-pip-controls {
+    padding: 3px 8px;
+    gap: 6px;
+  }
+
+  .fake-pip-play-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .fake-pip-time {
+    font-size: 11px;
+  }
+}
+
+/* ===== 矮屏适配 ===== */
+@media (max-height: 620px) and (min-width: 961px) {
+  .book-video-panel {
+    height: calc(100dvh - 24px);
+  }
+
+  .book-video-header {
+    padding: 16px 22px 12px;
+  }
+
+  .book-video-body {
+    height: calc(100% - 82px);
+  }
+
+  .book-video-player-shell {
+    max-height: 50dvh;
+  }
+
+  .book-video-meta-main p {
+    display: none;
+  }
+}
+
+/* ===== 阅读器顶部栏响应式 ===== */
+@media (max-width: 960px) {
+  .reader-topbar {
+    height: auto;
+    min-height: 68px;
+    align-items: flex-start;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
+    padding-bottom: 10px;
+  }
+
+  .reader-topbar > .reader-info {
+    position: static;
+    transform: none;
+    width: 100%;
+    max-width: min(56vw, 340px);
+    order: 2;
+    margin: 0 auto;
+  }
+
+  .reader-topbar-right {
+    order: 3;
+    margin-left: auto;
+    gap: 8px;
+  }
+
+  .toc-btn {
+    padding: 10px 16px;
+    font-size: 14px;
+    letter-spacing: 1px;
+    margin-left: 0;
+  }
+
+  .close-btn {
+    padding: 10px 16px;
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+}
+
+@media (max-width: 640px) {
+  .reader-topbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "info refresh";
+    align-items: start;
+    column-gap: 10px;
+    min-height: auto;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px;
+  }
+
+  .reader-topbar > .reader-info {
+    grid-area: info;
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+    margin: 0;
+    padding: 7px 10px;
+  }
+
+  .refresh-btn {
+    position: static;
+    grid-area: refresh;
+    align-self: start;
+    justify-self: end;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+
+  .reader-title {
+    font-size: 13px;
+    white-space: nowrap;
+    line-height: 1.45;
+  }
+
+  .reader-page {
+    font-size: 11px;
+  }
+
+  .toc-btn {
+    min-width: 64px;
+    padding-inline: 12px;
+  }
+
+  .video-trigger-btn {
+    height: 38px;
+    min-width: 38px;
+    padding: 0 8px;
+  }
+
+  .video-trigger-text {
+    display: inline-block;
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .video-trigger-icon {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+  }
+
+  .video-trigger-count {
+    min-width: 20px;
+    height: 20px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .reader-topbar {
+    display: flex;
+    justify-content: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+  }
+
+  .reader-topbar > .reader-info {
+    width: 100%;
+    max-width: min(72vw, 360px);
+    margin: 0 auto;
+    padding: 7px 10px;
+  }
+
+  .refresh-btn {
+    display: none;
+  }
+
+  /* 移动端：reader-bottom-controls 铺满宽度，四个按钮均匀分布 */
+  .reader-bottom-controls {
+    display: flex;
+    left: 8px;
+    right: 8px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 56px);
+    transform: none;
+    gap: 10px;
+    padding: 0 8px;
+  }
+
+  .reader-control-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 40px;
+    padding: 0 6px;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+
+  .reader-control-btn--back,
+  .reader-control-btn--toc {
+    flex: 1 1 0;
+  }
+
+  .reader-control-btn--refresh {
+    flex: 0 0 84px;
+  }
+
+  .flipbook-wrapper {
+    /* padding-bottom 已在 flipbook.css 移动端规则中覆盖 */
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
+  }
+
+  .nav-btn {
+    display: none !important;
+  }
+
+  .page-loading {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+  }
+}

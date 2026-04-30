@@ -1,0 +1,39 @@
+/* ===== 加载 & 错误 ===== */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13,8,5,0.75);
+  border-radius: 6px;
+  color: rgba(255,220,150,0.8);
+  gap: 14px;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 2px solid rgba(255,200,100,0.15);
+  border-top-color: rgba(255,200,100,0.85);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+.loading-spinner.small {
+  width: 22px;
+  height: 22px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error-msg {
+  text-align: center;
+  color: rgba(255,120,100,0.9);
+  padding: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+}

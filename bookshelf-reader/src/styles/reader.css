@@ -1,0 +1,141 @@
+/* ===== reader.css ===== */
+/* 修改点：移除移动端 reader-bottom-controls 的显示规则（已迁移至 flipbook.css 的 mobile-nav-controls） */
+
+.reader-scene {
+  width: 100%;
+  height: 100%;
+  min-height: calc(var(--vh, 1vh) * 100);
+  background:
+    radial-gradient(circle at top, rgba(255, 236, 202, 0.14), transparent 26%),
+    url('/bj.png') center center / cover no-repeat;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  box-sizing: border-box;
+  --reader-controls-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+}
+
+/* Keep the control chrome minimal so the visual weight stays on the book itself. */
+.reader-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 56px;
+  padding: calc(env(safe-area-inset-top, 0px) + 4px) 4px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.reader-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: min(72vw, 640px);
+  padding: 5px 10px;
+  /* background: rgba(46, 25, 9, 0.42); */
+  border: 1px solid rgba(255, 228, 187, 0.18);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16);
+  pointer-events: auto;
+}
+
+.reader-title {
+  width: auto;
+  height: 70px;
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .reader-title {
+    height: 90px;
+  }
+}
+
+.reader-page {
+  color: rgba(255, 237, 203, 0.92);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+.reader-topbar-right,
+.desk-topbar-right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.refresh-btn {
+  background: rgba(46, 25, 9, 0.52);
+  border: 1px solid rgba(255, 226, 180, 0.22);
+  color: rgba(255, 239, 210, 0.94);
+  border-radius: 999px;
+  font-size: 18px;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  width: 38px;
+  min-width: 38px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.refresh-btn:hover {
+  background: rgba(60, 35, 15, 0.7);
+}
+
+/* 底部按钮栏（桌面端显示，移动端由 media.css 覆盖样式） */
+.reader-bottom-controls {
+  position: absolute;
+  left: 50%;
+  bottom: var(--reader-controls-bottom);
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 220;
+  pointer-events: auto;
+}
+
+.reader-control-btn {
+  min-width: 88px;
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 226, 180, 0.28);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(57, 35, 15, 0.92) 0%, rgba(33, 20, 9, 0.95) 100%);
+  color: rgba(255, 241, 218, 0.96);
+  font-size: 14px;
+  letter-spacing: 1px;
+  cursor: default;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reader-control-btn--refresh {
+  min-width: 76px;
+  background: linear-gradient(135deg, rgba(121, 78, 30, 0.96) 0%, rgba(90, 52, 20, 0.98) 100%);
+}
+
+.reader-control-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+
+.reader-control-btn:not(:disabled):active {
+  transform: translateY(1px) scale(0.98);
+}

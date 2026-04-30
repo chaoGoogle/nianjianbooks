@@ -1,0 +1,594 @@
+/* ===== flipbook.css ===== */
+
+/* ===== Flipbook 容器 ===== */
+.flipbook-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex: 1;
+  /* 书本整体下移，底部保留更稳定的呼吸空间 */
+  margin-top: 42px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 42px);
+}
+
+.magazine-viewport { position: relative; overflow: visible; }
+
+.magazine-viewport .container {
+  position: absolute;
+  /* 维持视觉居中，同时保证底部不贴边 */
+  top: 51%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.magazine { position: relative; }
+
+.magazine .page-wrapper {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+.magazine .shadow {
+  display: none !important;
+}
+
+/* ===== 页面样式 ===== */
+.magazine .page {
+  background: #f8f2e6;
+  overflow: hidden;
+  position: relative;
+}
+
+.magazine .page .gradient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.magazine .even .gradient {
+  background: linear-gradient(to right, rgba(0,0,0,0) 90%, rgba(0,0,0,0.12) 100%);
+}
+
+.magazine .odd .gradient {
+  background: linear-gradient(to left, rgba(0,0,0,0) 90%, rgba(0,0,0,0.10) 100%);
+}
+
+/* ===== 页面内容排版 ===== */
+.page-frame {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: calc(20px * var(--page-scale)) calc(18px * var(--page-scale)) calc(40px * var(--page-scale));
+}
+
+.page-frame-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  background: transparent;
+  pointer-events: none;
+}
+
+.page-content {
+  padding: calc(36px * var(--page-scale)) calc(30px * var(--page-scale)) calc(54px * var(--page-scale));
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  font-size: calc(15px * var(--page-scale));
+  line-height: 1.95;
+  color: #1e1a14;
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Serif SC', serif;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* 超链接样式 - 去除下划线 */
+.page-content a {
+  text-decoration: none;
+  color: #2a5aa0;
+}
+
+.page-content a:hover {
+  color: #1a4a8a;
+}
+
+/* 全书完 */
+.page-content.page-end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a7a60;
+  font-size: 14px;
+  letter-spacing: 3px;
+}
+
+.page-content h1 {
+  font-size: 1.3em;
+  color: #1a1208;
+  margin: 0 0 0.8em;
+  line-height: 1.6;
+  text-align: center;
+  letter-spacing: 3px;
+  font-weight: 600;
+  padding-bottom: 0.5em;
+  border-bottom: 1px solid rgba(100,70,30,0.15);
+}
+
+.page-content h2 {
+  font-size: 1.1em;
+  color: #2a1e0e;
+  margin: 0.6em 0 0.4em;
+  line-height: 1.6;
+  letter-spacing: 2px;
+  font-weight: 600;
+}
+
+.page-content h3 {
+  font-size: 1em;
+  color: #2a1e0e;
+  margin: 0.5em 0 0.3em;
+  font-weight: 600;
+}
+
+.page-content p {
+  margin: 0 0 0.3em;
+  text-indent: 2em;
+  text-align: justify;
+}
+
+/* EPUB 自定义 class 统一重置，避免奇怪间距 */
+.page-content [class] {
+  margin-top: 0;
+  margin-bottom: 0.3em;
+}
+
+/* 章节标题类 */
+.page-content .calibre3,
+.page-content .calibre4,
+.page-content [class*="title"],
+.page-content [class*="head"] {
+  text-indent: 0;
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.1em;
+  margin: 0.4em 0 0.6em;
+  letter-spacing: 2px;
+}
+
+/* 正文类 */
+.page-content .normaltext,
+.page-content .calibre2,
+.page-content [class*="text"],
+.page-content [class*="body"] {
+  text-indent: 2em;
+  text-align: justify;
+}
+
+/* 去除 EPUB 中常见的多余空白 */
+.page-content p:empty { display: none; }
+
+.page-content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 8px auto;
+  cursor: zoom-in;
+}
+
+.page-content div { text-align: justify; }
+
+/* ===== 封面页 ===== */
+.cover-page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #f7edd8 0%, #ecdbb8 40%, #d4b888 100%);
+  padding: 0;
+  text-align: center;
+  position: relative;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.15);
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.cover-page * {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.cover-page::before {
+  content: '';
+  position: absolute;
+  inset: 12px;
+  border: 2px solid rgba(120, 80, 30, 0.25);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.cover-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.3) 0%, transparent 50%, rgba(0, 0, 0, 0.05) 100%);
+  pointer-events: none;
+}
+
+.cover-page img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+  cursor: zoom-in;
+}
+
+.cover-page h1 {
+  font-size: 26px;
+  color: #1e1208;
+  margin: 10px 0 8px;
+  letter-spacing: 6px;
+  font-weight: 700;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 1;
+}
+
+.cover-page p {
+  font-size: 15px;
+  color: #5a3a18;
+  letter-spacing: 4px;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== 页码 ===== */
+.page-num {
+  position: absolute;
+  bottom: calc(14px * var(--page-scale));
+  font-size: calc(13px * var(--page-scale));
+  color: #8a7a60;
+  letter-spacing: 1px;
+  font-family: Georgia, serif;
+}
+
+.page.odd .page-num  { right: calc(20px * var(--page-scale)); }
+.page.even .page-num { left: calc(20px * var(--page-scale)); }
+
+/* ===== 加载占位 ===== */
+.page-loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8f2e6;
+}
+
+/* ===== 扫描PDF页面 ===== */
+.scanned-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.scanned-page img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center center;
+  cursor: zoom-in;
+}
+
+.image-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(28, 24, 20, 0.72);
+  backdrop-filter: blur(22px) saturate(1.05);
+  -webkit-backdrop-filter: blur(22px) saturate(1.05);
+}
+
+.image-preview__img {
+  max-width: min(96vw, 1400px);
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.image-preview__close {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: default;
+}
+
+/* ===== 初始加载遮罩（PC 端等待前 3 页内容就绪） ===== */
+.initial-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  z-index: 300;
+  padding-bottom: 60px;
+  gap: 10px;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(13, 8, 5, 0.35) 0%, transparent 30%);
+}
+
+.initial-loading-overlay p {
+  margin: 0;
+  color: rgba(255, 220, 150, 0.85);
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.initial-loading-overlay .loading-spinner {
+  width: 36px;
+  height: 36px;
+  border-width: 3px;
+}
+
+/* 导航按钮 ===== */
+.nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 220, 160, 0.5);
+  background: linear-gradient(135deg, rgba(60, 40, 20, 0.85) 0%, rgba(40, 25, 10, 0.9) 100%);
+  color: rgba(255, 230, 180, 0.95);
+  font-size: 24px;
+  font-weight: bold;
+  cursor: default;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(255, 200, 100, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.nav-btn::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 220, 160, 0.15);
+  pointer-events: none;
+}
+
+.nav-btn:hover {
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, rgba(80, 55, 25, 0.95) 0%, rgba(60, 35, 15, 1) 100%);
+  border-color: rgba(255, 220, 160, 0.8);
+  color: #fff;
+  box-shadow: 
+    0 6px 24px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(255, 200, 100, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transform: translateY(-50%) scale(1.15);
+}
+
+.nav-btn:active {
+  transform: translateY(-50%) scale(1.05);
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.5),
+    inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.prev-btn { left: 24px; }
+.next-btn { right: 24px; }
+
+/* ===== 页面加载指示 ===== */
+.page-loading {
+  position: absolute;
+  bottom: 18px;
+  right: 18px;
+  z-index: 200;
+  opacity: 0.8;
+}
+
+/* ===== turn.js 翻页动画速度控制 ===== */
+/* turn.js 内部用 .p 类做折叠，控制 transition 速度 */
+.magazine .p {
+  -webkit-transition-duration: 1s !important;
+  transition-duration: 1s !important;
+}
+
+/* 角落 peel 预览动画减速（默认太快） */
+.magazine .page .corner,
+.magazine .page .corner * {
+  -webkit-transition-duration: 0.4s !important;
+  transition-duration: 0.4s !important;
+}
+
+/* ===== 扫描版 PDF 页面图片 ===== */
+.page-content.is-scanned-pdf {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.page-content.is-scanned-pdf .scanned-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+.page-content.is-scanned-pdf .scanned-page img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  object-fit: contain;
+  object-position: center center;
+}
+
+/* ===== 移动端导航按钮（书本下方相对距离） ===== */
+.mobile-nav-controls {
+  display: none;
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  gap: 12px;
+  z-index: 220;
+  pointer-events: auto;
+}
+
+.mobile-nav-btn {
+  min-width: 80px;
+  height: 44px;
+  padding: 0 20px;
+  border: 1px solid rgba(255, 226, 180, 0.28);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(57, 35, 15, 0.92) 0%, rgba(33, 20, 9, 0.95) 100%);
+  color: rgba(255, 241, 218, 0.96);
+  font-size: 14px;
+  letter-spacing: 1px;
+  cursor: default;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+
+.mobile-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+
+.mobile-nav-btn:not(:disabled):active {
+  transform: translateY(1px) scale(0.98);
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .magazine .page .corner.tl,
+  .magazine .page .corner.tr {
+    pointer-events: none !important;
+    opacity: 0 !important;
+  }
+
+  .flipbook-wrapper {
+    align-items: center;
+    justify-content: center;
+    margin-top: 0;
+    /* 增加底部内边距，为底部按钮区域腾出空间 */
+    padding: calc(env(safe-area-inset-top, 0px) + 88px) 0 calc(env(safe-area-inset-bottom, 0px) + 90px);
+  }
+
+  .magazine-viewport .container {
+    top: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  /* 显示移动端底部按钮，隐藏桌面端侧边按钮 */
+  .mobile-nav-controls {
+    display: none !important;
+  }
+
+  .nav-btn {
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+    transform: translateX(-50%);
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    min-height: 52px;
+    font-size: 22px;
+    display: none !important;
+    align-items: center;
+    justify-content: center;
+    z-index: 260;
+  }
+
+  .nav-btn:hover {
+    width: 52px;
+    height: 52px;
+    transform: translateX(-50%);
+  }
+
+  .nav-btn:active {
+    transform: translateX(-50%) scale(0.96);
+  }
+
+  .prev-btn {
+    left: calc(50% - 44px);
+  }
+
+  .next-btn {
+    left: calc(50% + 44px);
+    right: auto;
+  }
+
+  .image-preview {
+    padding: 16px;
+  }
+
+  .image-preview__img {
+    max-width: 100%;
+    max-height: 88vh;
+  }
+}
