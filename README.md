@@ -1,6 +1,6 @@
 # Book Library - 书架阅读器
 
-翻书式 PDF/EPUB 阅读器，Vue 3 前端 + Express 后端。
+翻书式 PDF 阅读器，Vue 3 前端 + Express 后端。
 
 ## 项目结构
 
@@ -9,18 +9,18 @@ book-libary/
 ├── bookshelf-reader/       # Vue 3 前端 (端口 80)
 │   ├── src/
 │   │   ├── App.vue         # 场景状态机 (书架 ↔ 阅读器)
-│   │   ├── components/     # DeskScene, ReaderScene, BookFlipbook
-│   │   ├── composables/    # useBookReader.js (核心状态)
-│   │   └── styles/         # CSS 样式文件
+│   │   ├── components/     # ReaderScene, BookFlipbook
+│   │   ├── composables/    # useBookReader.js + modules/ (11 子模块)
+│   │   └── styles/         # 9 个 CSS 文件
 │   ├── public/vendor/js/   # turn.js, jQuery (全局脚本)
 │   └── index.html
 ├── server/                 # Express 后端 (端口 8088)
-│   ├── server.js           # 主服务文件
+│   ├── server.js           # 主服务文件 (484 行)
 │   └── modules/            # 功能模块
 │       ├── constants.js    # 常量配置
 │       ├── pdf.js          # PDF 解析
 │       ├── books.js        # 书籍扫描
-│       └── ...
+│       └── utils.js        # 工具函数
 ├── .gitignore
 └── README.md
 ```

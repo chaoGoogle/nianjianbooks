@@ -1,13 +1,18 @@
 # SERVER
 
-Express API backend for PDF/EPUB content extraction, cover rendering, and search.
+Express API backend for PDF content extraction, cover rendering, and book scanning.
 
 ## STRUCTURE
 
 ```
 server/
-├── server.js    # Single-file Express server (~1200 lines): all routes + helpers
-├── package.json # Dependencies: express 5, pdfjs-dist, @napi-rs/canvas, jszip, @lingo-reader/epub-parser
+├── server.js    # Single-file Express server (484 lines): all routes + helpers
+├── modules/
+│   ├── constants.js  # Port, paths, validation helpers
+│   ├── pdf.js        # PDF parsing (pdfjs-dist, disabled worker)
+│   ├── books.js      # Book scanning, metadata extraction
+│   └── utils.js      # Utility functions
+├── package.json # Dependencies: express 5, pdfjs-dist, @napi-rs/canvas
 └── README.md    # API documentation (Chinese)
 ```
 
@@ -15,20 +20,17 @@ server/
 
 | Task | Location | Notes |
 |------|----------|-------|
-| Add a new API route | `server.js` — find the "API 路由" section | Routes start at ~line 724 |
+| Add a new API route | `server.js` — find the API routes section | Routes start at ~line 362 |
 | Modify PDF parsing | `server.js` → `extractPdfText()`, `normalizePdfItems()` | pdfjs-dist with disabled worker; CJK-aware line splitting |
-| Modify EPUB parsing | `server.js` → `extractEpubChapters()` | Uses JSZip directly (not epub-parser) for chapter content extraction |
 | Change cover rendering | `server.js` → `renderPdfCover()`, `buildPdfPlaceholderCover()` | @napi-rs/canvas renders page 1 as PNG; fallback generates SVG data URI |
-| Add file type support | `ALLOWED_EXTENSIONS` array + `validateFileExt()` | Currently `.pdf` and `.epub` only |
-| Book video metadata | `server.js` → `loadBookVideoRegistry()`, `resolveBookVideoConfig()` | Reads `public/books/book-videos.json` sidecar |
+| Add file type support | `ALLOWED_EXTENSIONS` array in `modules/constants.js` | Currently `.pdf` only |
+| Book scanning | `modules/books.js` → `scanBooksProgressive()` | Auto-discovers PDF files; extracts metadata (title, author, cover) |
 
 ## CONVENTIONS
 
 - **Single-file architecture** — all routes, helpers, and config in server.js
 - **Chinese error messages** — API responses use Chinese (`'扫描书籍目录失败'`, `'文件不存在'`, etc.)
 - **PDF worker disabled** — `disableWorker: true` + `GlobalWorkerOptions.workerSrc` set to file URL for Node.js environment
-- **EPUB dual strategy** — metadata via `@lingo-reader/epub-parser`; chapter content and covers via raw JSZip (workaround for path issues in epub-parser)
-- **Sidecar video config** — per-book video metadata loaded from `public/books/book-videos.json`, with legacy `.meta.json` fallback
 - **Input validation** — `validateInt()`, `validateFileExt()`, `sanitizeError()` helpers; file extension whitelist
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -40,8 +42,7 @@ server/
 
 ## NOTES
 
-- EPUB cover extraction handles 3 strategies: `properties="cover-image"`, `<meta name="cover">`, and direct `id="cover"` / `id="cover-image"`
 - PDF text normalization (`normalizePdfItems`) includes CJK character detection for proper spacing logic
 - `server/images/` is gitignored — used as runtime cache but not persisted in repo
 - Static file serving: `express.static(path.join(__dirname, '../public'))` serves the root public/ directory
-- Book scanning (`scanBooks()`) auto-discovers PDF and EPUB files; extracts metadata (title, author, cover) for each
+- Book scanning (`scanBooksProgressive()`) auto-discovers PDF files; extracts metadata (title, author, cover) for each
