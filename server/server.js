@@ -31,8 +31,15 @@ const brotliCompressAsync = promisify(brotliCompress);
 const CPU_COUNT = typeof os.availableParallelism === 'function'
   ? os.availableParallelism()
   : (os.cpus()?.length || 4);
-const PDF_CACHE_PAGE_CONCURRENCY = Math.max(2, Math.min(6, Math.floor(CPU_COUNT / 2) || 2));
-const PDF_CACHE_BOOK_CONCURRENCY = Math.max(1, Math.min(3, Math.floor(CPU_COUNT / 4) || 1));
+const PDF_CACHE_PAGE_CONCURRENCY = 1;
+const PDF_CACHE_BOOK_CONCURRENCY = 1;
+
+process.on('uncaughtException', (err) => {
+  console.error('[process] uncaughtException:', err.message);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[process] unhandledRejection:', err?.message || err);
+});
 
 const app = express();
 app.use(cors({
@@ -95,7 +102,8 @@ const booksCache = {
   loadingPromise: null,
   loadedAt: 0,
   total: 0,
-  processed: 0
+  processed: 0,
+  warmupDone: false
 };
 
 function resetBooksCache() {
@@ -154,53 +162,75 @@ function getBooksSnapshot({ forceRefresh = false } = {}) {
   };
 }
 
-const WARMUP_BOOK_COUNT = parseInt(process.env.WARMUP_BOOK_COUNT || '10', 10);
-const WARMUP_PAGE_COUNT = parseInt(process.env.WARMUP_PAGE_COUNT || '3', 10);
 const WARMUP_ENABLED = process.env.WARMUP_ENABLED !== 'false';
+let warmupRunning = false;
+let warmupFailed = false;
 
 async function warmBookLibrary() {
-  if (!WARMUP_ENABLED) {
-    console.log('[startup] warmup disabled, skipping library warmup');
-    return;
-  }
+  if (!WARMUP_ENABLED) return;
   const startedAt = Date.now();
   try {
     const books = await startBooksScan({ forceRefresh: true });
-    console.log(`[startup] library warmed: ${books.length} pdfs, ${Date.now() - startedAt}ms`);
+    console.log(`[warmup] library warmed: ${books.length} pdfs, ${Date.now() - startedAt}ms`);
   } catch (error) {
-    console.error('[startup] failed to warm library:', error);
+    console.error('[warmup] failed to warm library:', error.message);
   }
 }
 
 async function warmPdfLibraryCache() {
-  if (!WARMUP_ENABLED) {
-    console.log('[startup] warmup disabled, skipping PDF cache warmup');
-    return;
-  }
+  if (!WARMUP_ENABLED) return;
   try {
     const books = booksCache.loaded ? booksCache.data : await startBooksScan();
-  
-    const limitedBooks = books.slice(0, WARMUP_BOOK_COUNT);
-    
-    console.log(`[startup] warming cache for ${limitedBooks.length} books (${WARMUP_PAGE_COUNT} pages each)`);
-    
-    await runWithConcurrency(
-      limitedBooks.filter(book => !!book?.file),
-      PDF_CACHE_BOOK_CONCURRENCY,
-      async book => {
+
+    console.log(`[warmup] warming cache for all ${books.length} books`);
+
+    let done = 0;
+    for (const book of books.filter(b => !!b?.file)) {
+      try {
         const resolved = await resolvePdfPath(book.file);
-        if (resolved.error) return;
-      
-        await ensurePdfPageImageCache(book.file, resolved.filePath, { 
-          width: 1600, 
-          eagerPageCount: WARMUP_PAGE_COUNT 
+        if (resolved.error) continue;
+
+        await ensurePdfPageImageCache(book.file, resolved.filePath, {
+          width: 1600,
+          eagerPageCount: Infinity
         });
+        done += 1;
+        console.log(`[warmup] cached: ${book.file} (${done}/${books.length})`);
+      } catch (err) {
+        console.error(`[warmup] failed to cache ${book.file}:`, err.message);
       }
-    );
-    
-    console.log('[startup] initial cache warmup complete');
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    console.log(`[warmup] full cache warmup complete (${done}/${books.length})`);
   } catch (error) {
-    console.error('[startup] failed to warm pdf page cache:', error);
+    console.error('[warmup] failed to warm pdf page cache:', error.message);
+  }
+}
+
+function startBackgroundWarmup() {
+  if (warmupRunning) return;
+  warmupRunning = true;
+  warmupFailed = false;
+
+  warmBookLibrary()
+    .then(() => warmPdfLibraryCache())
+    .then(() => {
+      booksCache.warmupDone = true;
+      console.log('[warmup] all warmup tasks completed');
+    })
+    .catch(err => {
+      console.error('[warmup] background warmup error:', err.message);
+      warmupFailed = true;
+    })
+    .finally(() => {
+      warmupRunning = false;
+    });
+}
+
+function ensureWarmup() {
+  if (!warmupRunning && !booksCache.warmupDone) {
+    startBackgroundWarmup();
   }
 }
 
@@ -208,26 +238,24 @@ async function resolvePdfPath(file) {
   if (!file || typeof file !== 'string') {
     return { error: { status: 400, message: '缺少 pdfPath 参数' } };
   }
-  
 
   if (file.includes('..') || file.includes('/') || file.includes('\\')) {
     return { error: { status: 400, message: '仅支持 PDF 文件名，不支持路径' } };
   }
-  
+
   if (!validateFileExt(file)) {
     return { error: { status: 400, message: '仅支持 PDF 文件' } };
   }
   const safeFileName = path.basename(file);
   const filePath = path.join(BOOKS_DIR, safeFileName);
-  
 
   const resolvedPath = path.resolve(filePath);
   const normalizedBooksDir = path.resolve(BOOKS_DIR);
-  
+
   if (!resolvedPath.startsWith(normalizedBooksDir + path.sep) && resolvedPath !== normalizedBooksDir) {
     return { error: { status: 400, message: '无效的文件路径' } };
   }
-  
+
   try {
     await fs.access(filePath);
     return { filePath };
@@ -326,30 +354,47 @@ async function ensurePdfPageImageCache(file, pdfPath, { width = 1600, eagerPageC
 
   await fs.mkdir(cacheDir, { recursive: true });
 
+  let renderedCount = 0;
+
   await runWithConcurrency(
     Array.from({ length: sourcePages }, (_, index) => index + 1),
     PDF_CACHE_PAGE_CONCURRENCY,
     async pageNum => {
-    const pageFilePath = getPdfPageCacheFilePath(file, version, pageNum);
-    let cacheReady = false;
+      const pageFilePath = getPdfPageCacheFilePath(file, version, pageNum);
+      let cacheReady = false;
 
-    try {
-      const fileStat = await fs.stat(pageFilePath);
-      cacheReady = fileStat.size > 0 && fileStat.mtimeMs >= pdfStat.mtimeMs;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-    }
+      try {
+        const fileStat = await fs.stat(pageFilePath);
+        cacheReady = fileStat.size > 0 && fileStat.mtimeMs >= pdfStat.mtimeMs;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
 
-    if (!cacheReady && pageNum <= eagerPageCount) {
-      const buffer = await renderPdfPageToWebpBuffer(pdfPath, pageNum, width);
-      await fs.writeFile(pageFilePath, buffer);
-    }
+      if (!cacheReady && pageNum <= eagerPageCount) {
+        try {
+          const buffer = await renderPdfPageToWebpBuffer(pdfPath, pageNum, width);
+          await fs.writeFile(pageFilePath, buffer);
+        } catch (renderErr) {
+          console.error(`[warmup] skip page ${pageNum} of ${file}: ${renderErr.message}`);
+          urls[pageNum - 1] = null;
+          return;
+        }
+      }
 
-    if (cacheReady || pageNum <= eagerPageCount) {
-      await ensureBrotliSidecar(pageFilePath);
-    }
+      if (cacheReady || pageNum <= eagerPageCount) {
+        try {
+          await ensureBrotliSidecar(pageFilePath);
+        } catch (brErr) {
+          console.error(`[warmup] skip brotli ${file} p${pageNum}: ${brErr.message}`);
+        }
+      }
 
       urls[pageNum - 1] = buildPdfPageImageUrl(file, pageNum, version, width);
+
+      renderedCount += 1;
+      if (renderedCount % 10 === 0) {
+        await new Promise(r => setTimeout(r, 50));
+      }
     }
   );
 
@@ -359,8 +404,21 @@ async function ensurePdfPageImageCache(file, pdfPath, { width = 1600, eagerPageC
 async function getPdfPageImageList(file, pdfPath) {
   return ensurePdfPageImageCache(file, pdfPath, { width: 1600, eagerPageCount: 0 });
 }
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    success: true,
+    status: 'ok',
+    booksLoaded: booksCache.loaded,
+    booksCount: booksCache.data.length,
+    warmupDone: booksCache.warmupDone,
+    warmupRunning
+  });
+});
+
 app.get('/api/books', async (req, res) => {
   try {
+    ensureWarmup();
     const forceRefresh = req.query.refresh === '1';
     const snapshot = getBooksSnapshot({ forceRefresh });
     res.json({
@@ -476,9 +534,5 @@ app.get('/api/process', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`PDF Server running on http://localhost:${PORT}`);
   console.log(`Books directory: ${BOOKS_DIR}`);
-  warmBookLibrary()
-    .then(() => warmPdfLibraryCache())
-    .catch(error => {
-      console.error('[startup] background warmup failed:', error);
-    });
+  startBackgroundWarmup();
 });

@@ -397,7 +397,7 @@ export function useBookReader() {
       }
     } catch (err) {
       if (axios.isCancel(err)) return
-      error.value = '后端错误"?(localhost:3000)'
+      error.value = '后端服务异常，无法加载书籍列表'
     } finally {
       _booksRefreshInFlight = false
       if (!silent) loading.value = false
@@ -409,31 +409,38 @@ export function useBookReader() {
   }
 
   // Table of Contents Loading
+  const DEFAULT_TOC = [
+    { title: '2023年亮点', page: 5 },
+    { title: '荣誉榜', page: 11 },
+    { title: '工作概述', page: 15 },
+    { title: '公共服务', page: 21 },
+    { title: '一、开放服务', page: 23 },
+    { title: '二、陈列展览', page: 31 },
+    { title: '三、社会教育', page: 43 },
+    { title: '四、宣传推广', page: 85 },
+    { title: '五、数字化建设', page: 105 },
+    { title: '六、文化创意', page: 111 },
+    { title: '科学研究', page: 125 },
+    { title: '七、文物鉴定审核', page: 127 },
+    { title: '八、藏品征集管理', page: 131 },
+    { title: '九、文物保护修复', page: 143 },
+    { title: '十、学术与出版', page: 151 },
+    { title: '综合管理', page: 167 },
+    { title: '十一、党群建设', page: 169 },
+    { title: '十二、组织管理', page: 185 },
+    { title: '十三、安全保卫', page: 195 },
+    { title: '大事记', page: 198 }
+  ]
   let _loadedTocFile = ''
   async function loadToc(bookFile) {
     if (!bookFile) return
-    // Prevent duplicate requests
     if (_loadedTocFile === bookFile && tocList.value.length > 0) return
     _loadedTocFile = bookFile
-    try {
-      const response = await fetch('/toc.json')
-      if (!response.ok) {
-        console.warn('[TOC] 加载目录文件失败:', response.status)
-        return
-      }
-      const rawItems = await response.json()
-      if (!Array.isArray(rawItems)) {
-        console.warn('[TOC] 目录数据格式错误')
-        return
-      }
-      tocList.value = rawItems.map(item => ({
-        label: item.title || item.label || '',
-        title: item.title || item.title || '',
-        targetPage: Number(item.page) || Number(item.targetPage) || 0
-      }))
-    } catch (err) {
-      console.warn('[TOC] 加载目录失败:', err)
-    }
+    tocList.value = DEFAULT_TOC.map(item => ({
+      label: item.title || item.label || '',
+      title: item.title || '',
+      targetPage: Number(item.page) || 0
+    }))
   }
 
   async function fetchBookMeta(fileName) {
