@@ -4,12 +4,11 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "dev": "node --watch server.js",
-    "start": "node server.js"
+    "dev": "bun --watch server.js",
+    "start": "bun server.js"
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.98",
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "pdfjs-dist": "^5.6.205"  }
+    "pdfjs-dist": "^5.6.205"
+  }
 }

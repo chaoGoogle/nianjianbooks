@@ -9,6 +9,8 @@ import { requestBookMeta } from './bookApi.js'
 const APK_WARMUP_DELAY = 1200
 const APK_WARMUP_BATCH_PAUSE = 80
 
+const warmedFiles = new Set()
+
 export function scheduleLibraryWarmup(stateFlags, booksRef, warmLibraryCacheFn) {
   if (stateFlags.libraryWarmupScheduled || stateFlags.libraryWarmupRunning || !booksRef.value.length) return
   stateFlags.libraryWarmupScheduled = true
@@ -35,8 +37,9 @@ export async function warmLibraryCache(stateFlags, booksRef) {
   try {
     const snapshot = [...booksRef.value]
     for (const book of snapshot) {
-      if (!book?.file) continue
+      if (!book?.file || warmedFiles.has(book.file)) continue
       await requestBookMeta(book.file)
+      warmedFiles.add(book.file)
       await delay(APK_WARMUP_BATCH_PAUSE)
     }
   } finally {

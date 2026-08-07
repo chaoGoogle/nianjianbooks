@@ -27,8 +27,7 @@ import {
 } from './modules/pagination.js'
 
 const $ = window.$ || window.jQuery
-const API_BASE = import.meta.env.VITE_API_BASE || ''
-const API = API_BASE + '/api'
+const API = '/nianjian/api'
 const IS_ANDROID_DEVICE = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
 const LOAD_AHEAD_THRESHOLD = 4
 const PDF_PAGE_URLS_TTL = 1000 * 60 * 60 * 24 * 7
@@ -36,7 +35,7 @@ const PDF_PAGE_URLS_TTL = 1000 * 60 * 60 * 24 * 7
 function resolveApiAssetUrl(url) {
   if (!url || typeof url !== 'string') return url
   if (/^(data:|blob:|https?:\/\/)/i.test(url)) return url
-  if (url.startsWith('/api/')) return `${API_BASE}${url}`
+  if (url.startsWith('/api/')) return `/nianjian${url}`
   return url
 }
 
@@ -157,6 +156,9 @@ export function useBookReader() {
     displayTotalPages.value = 0
     currentPage.value = 1
     pageLoading.value = false
+    tocList.value = []
+    tocVisible.value = false
+    _loadedTocFile = ''
     _pageW = 0
     _pageH = 0
     _apiTotalChapters = 0
@@ -352,27 +354,6 @@ export function useBookReader() {
     return payload.data
   }
 
-  async function requestChapterData(fileName, chapterNum, { signal } = {}) {
-    const res = await axios.get(
-      `${API}/file/extract?file=${enc(fileName)}&page=${chapterNum}&pageSize=1`,
-      signal ? { signal } : undefined
-    )
-    const json = res.data
-    // No more content, mark as loaded
-    if (!json.success || !json.data?.pages?.length) {
-      return null
-    }
-    const pageData = json.data.pages[0]
-    return {
-      content: pageData.content,
-      isScanned: !!pageData.isScanned,
-      pageImageUrl: '',
-      type: json.data.type,
-      chapterId: pageData.chapterId || '',
-      chapterHref: pageData.chapterHref || ''
-    }
-  }
-
   function scheduleBooksRefresh(delayMs = 800) {
     const stateFlags = {
       get booksRefreshTimer() { return _booksRefreshTimer },
@@ -404,43 +385,92 @@ export function useBookReader() {
     }
   }
 
+  async function fetchBookByName(name) {
+    try {
+      const response = await axios.get(`${API}/books/by-name/${encodeURIComponent(name)}`)
+      const payload = response.data
+      if (!payload.success || !payload.data) {
+        return null
+      }
+      return {
+        ...payload.data,
+        cover: resolveApiAssetUrl(payload.data.cover)
+      }
+    } catch (err) {
+      if (err.response?.status === 404) {
+        return null
+      }
+      console.warn('获取书籍失败:', err)
+      return null
+    }
+  }
+
   function getInitialPreloadCount() {
     return 1
   }
 
-  // Table of Contents Loading
-  const DEFAULT_TOC = [
-    { title: '2023年亮点', page: 5 },
-    { title: '荣誉榜', page: 11 },
-    { title: '工作概述', page: 15 },
-    { title: '公共服务', page: 21 },
-    { title: '一、开放服务', page: 23 },
-    { title: '二、陈列展览', page: 31 },
-    { title: '三、社会教育', page: 43 },
-    { title: '四、宣传推广', page: 85 },
-    { title: '五、数字化建设', page: 105 },
-    { title: '六、文化创意', page: 111 },
-    { title: '科学研究', page: 125 },
-    { title: '七、文物鉴定审核', page: 127 },
-    { title: '八、藏品征集管理', page: 131 },
-    { title: '九、文物保护修复', page: 143 },
-    { title: '十、学术与出版', page: 151 },
-    { title: '综合管理', page: 167 },
-    { title: '十一、党群建设', page: 169 },
-    { title: '十二、组织管理', page: 185 },
-    { title: '十三、安全保卫', page: 195 },
-    { title: '大事记', page: 198 }
-  ]
   let _loadedTocFile = ''
   async function loadToc(bookFile) {
+    console.log('[loadToc] called with bookFile:', bookFile, 'current _loadedTocFile:', _loadedTocFile)
     if (!bookFile) return
-    if (_loadedTocFile === bookFile && tocList.value.length > 0) return
+    if (_loadedTocFile === bookFile && tocList.value.length > 0) {
+      console.log('[loadToc] skip — already loaded for', bookFile)
+      return
+    }
     _loadedTocFile = bookFile
-    tocList.value = DEFAULT_TOC.map(item => ({
-      label: item.title || item.label || '',
-      title: item.title || '',
-      targetPage: Number(item.page) || 0
-    }))
+
+    const bookName = String(bookFile || '').replace(/\.pdf$/i, '')
+
+    if (bookName === '2024') {
+      tocList.value = [
+        { label: '2023年亮点', targetPage: 5 },
+        { label: '荣誉榜', targetPage: 11 },
+        { label: '工作概述', targetPage: 15 },
+        { label: '公共服务', targetPage: 21 },
+        { label: '一、开放服务', targetPage: 23 },
+        { label: '二、陈列展览', targetPage: 31 },
+        { label: '三、社会教育', targetPage: 43 },
+        { label: '四、宣传推广', targetPage: 85 },
+        { label: '五、数字化建设', targetPage: 105 },
+        { label: '六、文化创意', targetPage: 111 },
+        { label: '科学研究', targetPage: 125 },
+        { label: '七、文物鉴定审核', targetPage: 127 },
+        { label: '八、藏品征集管理', targetPage: 131 },
+        { label: '九、文物保护修复', targetPage: 143 },
+        { label: '十、学术与出版', targetPage: 151 },
+        { label: '综合管理', targetPage: 167 },
+        { label: '十一、党群建设', targetPage: 169 },
+        { label: '十二、组织管理', targetPage: 185 },
+        { label: '十三、安全保卫', targetPage: 195 },
+        { label: '大事记', targetPage: 198 }
+      ]
+    } else if (bookName === '2025') {
+      tocList.value = [
+        { label: '工作概述', targetPage: 7 },
+        { label: '大事记', targetPage: 13 },
+        { label: '公共服务', targetPage: 19 },
+        { label: '一、开放服务', targetPage: 20 },
+        { label: '二、陈列展览', targetPage: 25 },
+        { label: '三、社会教育', targetPage: 43 },
+        { label: '四、宣传推广', targetPage: 98 },
+        { label: '五、数字化建设', targetPage: 128 },
+        { label: '六、文化创意', targetPage: 131 },
+        { label: '科学研究', targetPage: 141 },
+        { label: '七、文物鉴定审核', targetPage: 142 },
+        { label: '八、藏品征集管理', targetPage: 144 },
+        { label: '九、文物保护修复', targetPage: 159 },
+        { label: '十、学术与出版', targetPage: 175 },
+        { label: '综合管理', targetPage: 181 },
+        { label: '十一、党群建设', targetPage: 182 },
+        { label: '十二、组织管理', targetPage: 191 },
+        { label: '十三、安全保卫', targetPage: 197 },
+        { label: '附录', targetPage: 199 },
+        { label: '2024年亮点', targetPage: 202 },
+        { label: '荣誉榜', targetPage: 204 }
+      ]
+    } else {
+      tocList.value = []
+    }
   }
 
   async function fetchBookMeta(fileName) {
@@ -473,6 +503,7 @@ export function useBookReader() {
       getAbortController()
 
       await fetchBookMeta(book.file)
+      await loadToc(book.file)
 
       if (book.type === 'pdf') {
         fetchPdfPageList(book.file)
@@ -652,61 +683,13 @@ export function useBookReader() {
     const fileName = currentBook.value?.file || ''
 
     try {
-      let data = pageCache.get(chapterNum)
-      if (!data) {
-        data = await requestChapterData(fileName, chapterNum, {
-          signal: _abortController?.signal
-        })
-        if (!data) {
-          // No more content, mark as loaded
-          _chaptersLoaded = chapterNum
-          _loadingChapter = false
-          pageLoading.value = false
-          if (_chaptersLoaded >= _apiTotalChapters) {
-            displayTotalPages.value = totalPages.value
-          }
-          return
-        }
-        if (data) {
-          pageCache.set(chapterNum, data)
-        }
-      }
-
       if (_abortController?.signal?.aborted) return
 
-      // Check if scanned PDF (empty content)
-      const isScannedPdf = data?.type === 'pdf' && (data?.isScanned || !data?.content?.trim())
-      
-      if (data?.content?.trim()) {
-        // Normal text content
-        const chunks = splitContentToPages(data.content, data.type, _pageW, _pageH)
-        const startTurnPage = totalPages.value + 1
-
-        chunks.forEach(html => {
-          const turnPage = totalPages.value + 1
-          pageMap.set(turnPage, html)
-          totalPages.value = turnPage
-        })
-
-        const endTurnPage = totalPages.value
-        
-        if (data.chapterHref || data.chapterId) {
-          updateTocPageMapping(chapterNum, data.chapterId, data.chapterHref, startTurnPage, endTurnPage)
-        }
-      } else if (isScannedPdf) {
-        let pageImageUrl = data?.pageImageUrl || ''
-        if (!pageImageUrl) {
-          pageImageUrl = await getPdfPageUrl(fileName, chapterNum)
-          if (pageImageUrl) {
-            data.pageImageUrl = pageImageUrl
-            pageCache.set(chapterNum, data)
-          }
-        }
-        if (pageImageUrl) {
-          const turnPage = totalPages.value + 1
-          pageMap.set(turnPage, buildPdfImagePageHtml(pageImageUrl, chapterNum))
-          totalPages.value = turnPage
-        }
+      const pageImageUrl = await getPdfPageUrl(fileName, chapterNum)
+      if (pageImageUrl) {
+        const turnPage = totalPages.value + 1
+        pageMap.set(turnPage, buildPdfImagePageHtml(pageImageUrl, chapterNum))
+        totalPages.value = turnPage
       }
 
       _chaptersLoaded = chapterNum
@@ -871,42 +854,7 @@ export function useBookReader() {
   function reflowPages() {
     if (!currentBook.value?.file || _chaptersLoaded === 0) return
 
-    const pageSize = calculatePageSize()
-    _pageW = pageSize.pageW
-    _pageH = pageSize.pageH
     const previousPage = currentPage.value
-
-    pageMap.clear()
-    totalPages.value = 0
-
-    for (let ch = 1; ch <= _chaptersLoaded; ch++) {
-      const data = pageCache.get(ch)
-      const isScannedPdf = data?.type === 'pdf' && (data?.isScanned || !data?.content?.trim())
-
-      if (isScannedPdf) {
-        if (!data?.pageImageUrl) continue
-        const turnPage = totalPages.value + 1
-        pageMap.set(turnPage, buildPdfImagePageHtml(data.pageImageUrl, ch))
-        totalPages.value = turnPage
-        continue
-      }
-
-      if (!data?.content?.trim()) continue
-
-      const chunks = splitContentToPages(data.content, data.type, _pageW, _pageH)
-      const startTurnPage = totalPages.value + 1
-
-      chunks.forEach(html => {
-        const turnPage = totalPages.value + 1
-        pageMap.set(turnPage, html)
-        totalPages.value = turnPage
-      })
-
-      const endTurnPage = totalPages.value
-      if (data.chapterHref || data.chapterId) {
-        updateTocPageMapping(ch, data.chapterId, data.chapterHref, startTurnPage, endTurnPage)
-      }
-    }
 
     if (_chaptersLoaded >= _apiTotalChapters) {
       displayTotalPages.value = totalPages.value
@@ -922,7 +870,7 @@ export function useBookReader() {
     tocList, tocVisible,
     viewport, magazine,
     pageMap, pageCache, chapterPageMap,
-    fetchBooks, prepareBook, ensureBookPrepared,
+    fetchBooks, fetchBookByName, prepareBook, ensureBookPrepared,
     loadToc, toggleToc, jumpToTocItem,
     getAbortController, abortAllRequests, resetBookState, scheduleLoad,
     loadNextChapter, splitContentToPages, addPage, renderPage, mountHtmlPage,

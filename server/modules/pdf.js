@@ -5,7 +5,7 @@ import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mj
 import { createCanvas } from '@napi-rs/canvas';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { BOOK_THUMB_CACHE_DIR } from './constants.js';
-import { escHtml, normalizeBookTitle, pickPdfTitle, parsePdfFilename } from './utils.js';
+import { normalizeBookTitle, pickPdfTitle, parsePdfFilename } from './utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,10 +20,10 @@ function buildPdfPlaceholderCoverSvg(title) {
   return decodeURIComponent(buildPdfPlaceholderCover(title).replace('data:image/svg+xml;charset=utf-8,', ''));
 }
 
-const MAX_PDF_DOCUMENT_CACHE_SIZE = Math.max(1, parseInt(process.env.MAX_PDF_DOCUMENT_CACHE_SIZE || '10', 10));
-const MAX_PDF_PAGE_BUFFER_CACHE_SIZE = Math.max(1, parseInt(process.env.MAX_PDF_PAGE_BUFFER_CACHE_SIZE || '50', 10));
-const MAX_PDF_IMAGE_CACHE_SIZE = Math.max(1, parseInt(process.env.MAX_PDF_IMAGE_CACHE_SIZE || '100', 10));
-const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || '300000', 10);
+const MAX_PDF_DOCUMENT_CACHE_SIZE = Math.max(1, parseInt(process.env.MAX_PDF_DOCUMENT_CACHE_SIZE || '3', 10));
+const MAX_PDF_PAGE_BUFFER_CACHE_SIZE = Math.max(1, parseInt(process.env.MAX_PDF_PAGE_BUFFER_CACHE_SIZE || '5', 10));
+const MAX_PDF_IMAGE_CACHE_SIZE = Math.max(1, parseInt(process.env.MAX_PDF_IMAGE_CACHE_SIZE || '10', 10));
+const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || '60000', 10);
 class LRUCache extends Map {
   constructor(maxSize, ttlMs = CACHE_TTL_MS) {
     super();
@@ -107,7 +107,7 @@ setInterval(() => {
   pdfDocumentCache.cleanup();
   pdfPageBufferCache.cleanup();
   pdfImageCache.cleanup();
-}, 600000).unref();
+}, 30000).unref();
 
 async function getPdfDocumentCacheKey(pdfPath) {
   const stat = await fs.stat(pdfPath);
@@ -120,7 +120,7 @@ export async function loadPdfDocument(pdfPath) {
     return pdfDocumentCache.get(cacheKey);
   }
 
-  const loadPromise = fs.readFile(pdfPath)
+  const loadPromise = Bun.file(pdfPath).arrayBuffer()
     .then(fileBuffer => getDocument({
       data: new Uint8Array(fileBuffer),
       disableWorker: true
@@ -147,7 +147,7 @@ function normalizeRenderWidth(targetWidth, fallbackWidth) {
   const preferredWidth = Number.isFinite(targetWidth) && targetWidth > 0
     ? targetWidth
     : fallbackWidth;
-  return Math.min(Math.max(Math.round(preferredWidth), 280), 2400);
+  return Math.min(Math.max(Math.round(preferredWidth), 280), 3200);
 }
 
 export async function renderPdfPageToPngBuffer(pdfPath, pageNum = 1, targetWidth = 220) {
@@ -298,9 +298,11 @@ export function setPdfPageToCache(pdfPath, pageNum, width, imageDataUrl) {
 }
 
 export function clearPdfPageCache() {
+  pdfDocumentCache.clear();
   pdfImageCache.clear();
   pdfPageBufferCache.clear();
   pdfPageBufferPromiseCache.clear();
+  pdfSpreadCache.clear();
 }
 
 function getPdfThumbCacheBaseName(pdfPath) {
@@ -407,136 +409,6 @@ export async function readPdfBookMeta(pdfPath, file) {
   }
 
   return { title, author, cover };
-}
-
-export function normalizePdfItems(items) {
-  const normalizedItems = items
-    .map(item => ({
-      rawText: item.str || '',
-      text: (item.str || '').trim(),
-      x: Array.isArray(item.transform) ? item.transform[4] : 0,
-      y: Array.isArray(item.transform) ? item.transform[5] : 0,
-      width: typeof item.width === 'number' ? item.width : 0,
-      hasEOL: !!item.hasEOL
-    }))
-    .filter(item => item.text || item.rawText);
-
-  normalizedItems.sort((a, b) => {
-    if (Math.abs(b.y - a.y) > 2) return b.y - a.y;
-    return a.x - b.x;
-  });
-
-  const lines = [];
-  let currentLine = [];
-  let currentY = null;
-
-  function isCjk(char) { return /[\u3400-\u9fff\uf900-\ufaff]/.test(char || ''); }
-  function isPunctuation(char) { return /[，。！；：？''（）《》〈〉【】〔〕〖〗…、?.!?;:()[\]{}"'`]/.test(char || ''); }
-
-  function needsSpace(prevItem, nextItem) {
-    const prevText = prevItem?.text || '';
-    const nextText = nextItem?.text || '';
-    if (!prevText || !nextText) return false;
-    const prevChar = prevText.slice(-1);
-    const nextChar = nextText[0];
-    if (isCjk(prevChar) && isCjk(nextChar)) return false;
-    if (isPunctuation(prevChar) || isPunctuation(nextChar)) return false;
-    const xGap = nextItem.x - (prevItem.x + prevItem.width);
-    if (xGap > 3) return true;
-    return /[A-Za-z0-9]/.test(prevChar) && /[A-Za-z0-9]/.test(nextChar);
-  }
-
-  function flushLine() {
-    if (!currentLine.length) return;
-    let line = '';
-    currentLine.forEach((item, index) => {
-      if (!item.text) return;
-      if (line && needsSpace(currentLine[index - 1], item)) line += ' ';
-      line += item.text;
-    });
-    line = line.replace(/\s{2,}/g, ' ').trim();
-    if (line) lines.push(line);
-    currentLine = [];
-  }
-
-  for (const item of normalizedItems) {
-    const lineChanged = currentY !== null && Math.abs(item.y - currentY) > 2;
-    if (lineChanged && currentLine.length) flushLine();
-    currentLine.push(item);
-    currentY = item.y;
-    if (item.hasEOL) {
-      flushLine();
-      currentY = null;
-    }
-  }
-  if (currentLine.length) flushLine();
-
-  const cleanLines = lines.map(line => line.replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
-  const paragraphs = [];
-  let paragraph = [];
-
-  function flushParagraph() {
-    if (!paragraph.length) return;
-    paragraphs.push(paragraph.join(' ').replace(/\s{2,}/g, ' ').trim());
-    paragraph = [];
-  }
-
-  cleanLines.forEach((line, index) => {
-    const prevLine = cleanLines[index - 1] || '';
-    const nextLine = cleanLines[index + 1] || '';
-    const currentIndent = /^\s|^[\u3000]/.test(line);
-    const prevEndsSentence = /[銆傦紒锛燂紱.!?鈥︼細:]$/.test(prevLine);
-    const nextStartsIndent = /^\s|^[\u3000]/.test(nextLine);
-    const shortLine = line.length <= 18;
-    paragraph.push(line.trim());
-    if (prevEndsSentence || currentIndent || shortLine || nextStartsIndent || !nextLine) flushParagraph();
-  });
-
-  flushParagraph();
-  return (paragraphs.length ? paragraphs : cleanLines).join('\n\n');
-}
-
-export async function extractPdfText(pdfPath, startPage = 1, endPage = null) {
-  const pdf = await loadPdfDocument(pdfPath);
-  const totalPages = pdf.numPages;
-  const actualEndPage = endPage || totalPages;
-  const pages = [];
-
-  let coverImage = null;
-  if (startPage === 1) {
-    try {
-      coverImage = await renderPdfPageToImage(pdfPath, 1);
-    } catch {}
-  }
-
-  for (let i = startPage; i <= Math.min(actualEndPage, totalPages); i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = normalizePdfItems(textContent.items);
-    const isScanned = !pageText.trim();
-    const htmlContent = pageText
-      .split(/\n{2,}/)
-      .map(block => block.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim())
-      .filter(Boolean)
-      .map(block => `<p>${escHtml(block)}</p>`)
-      .join('');
-    pages.push({ pageNum: i, content: htmlContent, isScanned });
-  }
-
-  return { pages, totalPages, currentPage: startPage, endPage: Math.min(actualEndPage, totalPages), coverImage };
-}
-
-export async function renderPdfPageToImage(pdfPath, pageNum, targetWidth = 1600) {
-
-  const cached = getPdfPageFromCache(pdfPath, pageNum, targetWidth);
-  if (cached) {
-    return cached;
-  }
-  const coverBuffer = await renderPdfPageToPngBuffer(pdfPath, pageNum, targetWidth);
-  const imageDataUrl = `data:image/png;base64,${coverBuffer.toString('base64')}`;
-  setPdfPageToCache(pdfPath, pageNum, targetWidth, imageDataUrl);
-
-  return imageDataUrl;
 }
 
 export async function renderPdfSpreadToPngBuffer(pdfPath, spreadNum, targetWidth = 2400) {

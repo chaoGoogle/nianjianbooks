@@ -13,11 +13,12 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 80,
+    port: 5473,
     proxy: {
-      '/api': {
-        target: process.env.VITE_API_BASE,
-        changeOrigin: true
+'/nianjian/api': {
+        target: process.env.VITE_API_BASE || 'http://localhost:8088',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/nianjian\/api/, '/api')
       }
     }
   },

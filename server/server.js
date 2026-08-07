@@ -1,14 +1,9 @@
-import express from 'express';
-import cors from 'cors';
 import path from 'path';
 import fs from 'fs/promises';
-import { createReadStream } from 'fs';
-import crypto from 'crypto';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { brotliCompress } from 'zlib';
 import { promisify } from 'util';
-process.env.NODE_OPTIONS = '--input-type=module';
 
 import {
   PORT,
@@ -20,19 +15,94 @@ import {
 } from './modules/constants.js';
 import {
   loadPdfDocument,
-  extractPdfText,
-  renderPdfPageToWebpBuffer
+  renderPdfPageToWebpBuffer,
+  clearPdfPageCache
 } from './modules/pdf.js';
 import { scanBooksProgressive } from './modules/books.js';
+import { renderPageInWorker, isRenderPoolAvailable, getRenderWorkerMemory, purgeRenderWorkers, RENDER_POOL_SIZE } from './modules/renderPool.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const brotliCompressAsync = promisify(brotliCompress);
-const CPU_COUNT = typeof os.availableParallelism === 'function'
-  ? os.availableParallelism()
-  : (os.cpus()?.length || 4);
+const CPU_COUNT = (() => {
+  const parallelism = typeof os.availableParallelism === 'function'
+    ? os.availableParallelism()
+    : undefined;
+  if (Number.isFinite(parallelism) && parallelism > 0) return parallelism;
+  return os.cpus()?.length || 4;
+})();
 const PDF_CACHE_PAGE_CONCURRENCY = 1;
 const PDF_CACHE_BOOK_CONCURRENCY = 1;
+const MEMORY_LIMIT = 1024 * 1024 * 1024;
+const MEMORY_RSS_LIMIT = Math.max(1024, parseInt(process.env.MEMORY_RSS_LIMIT_MB || '3072', 10)) * 1024 * 1024;
+const MEMORY_CHECK_INTERVAL = 30_000;
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Accept'
+};
+
+function withCors(headers = {}) {
+  return { ...CORS_HEADERS, ...headers };
+}
+
+function jsonResponse(data, status = 200, headers = {}) {
+  return Response.json(data, { status, headers: withCors(headers) });
+}
+
+function logRequest(req) {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${new URL(req.url).pathname}${new URL(req.url).search}`);
+}
+
+function withLog(handler) {
+  return (req) => {
+    logRequest(req);
+    return handler(req);
+  };
+}
+
+function getMemoryUsage() {
+  const mem = process.memoryUsage();
+  return {
+    rss: mem.rss,
+    heapUsed: mem.heapUsed,
+    heapTotal: mem.heapTotal,
+    external: mem.external,
+    arrayBuffers: mem.arrayBuffers
+  };
+}
+
+function formatBytes(bytes) {
+  const mb = (bytes / (1024 * 1024)).toFixed(1);
+  return `${mb}MB`;
+}
+
+function checkMemory() {
+  const mem = getMemoryUsage();
+  const heapMB = mem.heapUsed;
+  const rssMB = mem.rss;
+
+  if (heapMB > MEMORY_LIMIT) {
+    console.warn(`[memory] heap ${formatBytes(heapMB)} exceeds limit ${formatBytes(MEMORY_LIMIT)}, clearing caches and triggering GC...`);
+    clearPdfPageCache();
+    Bun.gc(true);
+    const after = getMemoryUsage();
+    console.log(`[memory] GC done: heap ${formatBytes(after.heapUsed)} (freed ${formatBytes(heapMB - after.heapUsed)})`);
+  }
+
+  if (rssMB > MEMORY_RSS_LIMIT) {
+    console.warn(`[memory] RSS ${formatBytes(rssMB)} exceeds limit ${formatBytes(MEMORY_RSS_LIMIT)}, clearing caches, purging render workers and triggering GC...`);
+    clearPdfPageCache();
+    purgeRenderWorkers();
+    Bun.gc(true);
+    const after = getMemoryUsage();
+    console.log(`[memory] GC done: RSS ${formatBytes(after.rss)} (freed ${formatBytes(rssMB - after.rss)})`);
+  }
+}
+
+setInterval(checkMemory, MEMORY_CHECK_INTERVAL);
+checkMemory();
 
 process.on('uncaughtException', (err) => {
   console.error('[process] uncaughtException:', err.message);
@@ -40,61 +110,6 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (err) => {
   console.error('[process] unhandledRejection:', err?.message || err);
 });
-
-const app = express();
-app.use(cors({
-  origin: true,
-  methods: ['GET', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Accept'],
-  credentials: false,
-  maxAge: 86400
-}));
-app.use(express.json());
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  next();
-});
-
-app.use(express.static(path.join(__dirname, '../public')));
-app.use('/api/book-thumbs', express.static(BOOK_THUMB_CACHE_DIR, {
-  immutable: true,
-  maxAge: '365d'
-}));
-app.use('/api/pdf-pages', async (req, res, next) => {
-  try {
-    const relativePath = path.normalize(decodeURIComponent(req.path || '/')).replace(/^([/\\])+/, '');
-    const sourcePath = path.join(PDF_PAGE_CACHE_DIR, relativePath);
-    const normalizedRoot = path.resolve(PDF_PAGE_CACHE_DIR);
-    const normalizedSource = path.resolve(sourcePath);
-
-    if (!normalizedSource.startsWith(normalizedRoot)) {
-      return res.status(400).end();
-    }
-
-    const acceptEncoding = String(req.headers['accept-encoding'] || '');
-    if (!acceptEncoding.includes('br')) {
-      return next();
-    }
-
-    const compressedPath = `${normalizedSource}.br`;
-    await fs.access(compressedPath);
-    res.setHeader('Content-Type', 'image/webp');
-    res.setHeader('Content-Encoding', 'br');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.setHeader('Vary', 'Accept-Encoding');
-    createReadStream(compressedPath).pipe(res);
-  } catch {
-    next();
-  }
-});
-app.use('/api/pdf-pages', express.static(PDF_PAGE_CACHE_DIR, {
-  immutable: true,
-  maxAge: '365d',
-  setHeaders(res) {
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.setHeader('Vary', 'Accept-Encoding');
-  }
-}));
 
 const booksCache = {
   data: [],
@@ -185,24 +200,29 @@ async function warmPdfLibraryCache() {
     console.log(`[warmup] warming cache for all ${books.length} books`);
 
     let done = 0;
+    let skipped = 0;
     for (const book of books.filter(b => !!b?.file)) {
       try {
         const resolved = await resolvePdfPath(book.file);
         if (resolved.error) continue;
 
-        await ensurePdfPageImageCache(book.file, resolved.filePath, {
-          width: 1600,
+        const result = await ensurePdfPageImageCache(book.file, resolved.filePath, {
+          width: 2400,
           eagerPageCount: Infinity
         });
         done += 1;
-        console.log(`[warmup] cached: ${book.file} (${done}/${books.length})`);
+        if (result.renderedCount === 0) {
+          skipped += 1;
+          console.log(`[warmup] skipped (cached): ${book.file} (${done}/${books.length})`);
+        } else {
+          console.log(`[warmup] cached: ${book.file} (${done}/${books.length})`);
+        }
       } catch (err) {
         console.error(`[warmup] failed to cache ${book.file}:`, err.message);
       }
-      await new Promise(r => setTimeout(r, 200));
     }
 
-    console.log(`[warmup] full cache warmup complete (${done}/${books.length})`);
+    console.log(`[warmup] full cache warmup complete (${done}/${books.length}, ${skipped} skipped)`);
   } catch (error) {
     console.error('[warmup] failed to warm pdf page cache:', error.message);
   }
@@ -264,15 +284,17 @@ async function resolvePdfPath(file) {
   }
 }
 
-function getPdfRenderVersion(pdfPath, stat) {
-  return crypto
-    .createHash('sha1')
-    .update(`${path.basename(pdfPath)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`)
-    .digest('hex')
-    .slice(0, 16);
+function sha1Hex(input) {
+  const hasher = new Bun.CryptoHasher('sha1');
+  hasher.update(input);
+  return hasher.digest('hex');
 }
 
-function buildPdfPageImageUrl(file, pageNum, version, width = 1600) {
+function getPdfRenderVersion(pdfPath, stat) {
+  return sha1Hex(`${path.basename(pdfPath)}:${stat.size}:${Math.trunc(stat.mtimeMs)}`).slice(0, 16);
+}
+
+function buildPdfPageImageUrl(file, pageNum, version, width = 2400) {
   const baseName = getPdfPageCacheBaseName(file);
   const pageFileName = `page-${String(pageNum).padStart(4, '0')}.webp`;
   return `/api/pdf-pages/${baseName}/${version}/${pageFileName}`;
@@ -286,7 +308,7 @@ function getPdfPageCacheBaseName(file) {
     .replace(/^[-_]+|[-_]+$/g, '')
     .slice(0, 48);
   const safeBase = /[a-zA-Z0-9]/.test(normalizedBase) ? normalizedBase : 'pdf';
-  const hash = crypto.createHash('sha1').update(path.basename(String(file || 'pdf'))).digest('hex').slice(0, 12);
+  const hash = sha1Hex(path.basename(String(file || 'pdf'))).slice(0, 12);
   return `${safeBase}-${hash}`;
 }
 
@@ -318,9 +340,9 @@ async function ensureBrotliSidecar(filePath) {
     if (error.code !== 'ENOENT') throw error;
   }
 
-  const buffer = await fs.readFile(filePath);
-  const compressedBuffer = await brotliCompressAsync(buffer);
-  await fs.writeFile(compressedPath, compressedBuffer);
+  const buffer = await Bun.file(filePath).arrayBuffer();
+  const compressedBuffer = await brotliCompressAsync(Buffer.from(buffer));
+  await Bun.write(compressedPath, compressedBuffer);
 }
 
 async function runWithConcurrency(items, limit, worker) {
@@ -344,7 +366,13 @@ async function runWithConcurrency(items, limit, worker) {
   return results;
 }
 
-async function ensurePdfPageImageCache(file, pdfPath, { width = 1600, eagerPageCount = Infinity } = {}) {
+async function renderPageForCache(pdfPath, pageNum, width) {
+  const workerResult = renderPageInWorker(pdfPath, pageNum, width);
+  if (workerResult) return workerResult;
+  return renderPdfPageToWebpBuffer(pdfPath, pageNum, width);
+}
+
+async function ensurePdfPageImageCache(file, pdfPath, { width = 2400, eagerPageCount = Infinity } = {}) {
   const pdfStat = await fs.stat(pdfPath);
   const version = getPdfRenderVersion(pdfPath, pdfStat);
   const pdf = await loadPdfDocument(pdfPath);
@@ -352,13 +380,44 @@ async function ensurePdfPageImageCache(file, pdfPath, { width = 1600, eagerPageC
   const cacheDir = getPdfPageCacheDir(file, version);
   const urls = new Array(sourcePages);
 
+  if (sourcePages === 0) return { urls: [], sourcePages: 0, version };
+
+  let allCached = true;
+  for (let i = 1; i <= sourcePages; i++) {
+    const pageFilePath = getPdfPageCacheFilePath(file, version, i);
+    try {
+      const fileStat = await fs.stat(pageFilePath);
+      if (fileStat.size === 0 || fileStat.mtimeMs < pdfStat.mtimeMs) {
+        allCached = false;
+        break;
+      }
+    } catch {
+      allCached = false;
+      break;
+    }
+  }
+
+  if (allCached) {
+    console.log(`[cache] ${file}: all ${sourcePages} pages cached, skipping`);
+    for (let i = 0; i < sourcePages; i++) {
+      urls[i] = buildPdfPageImageUrl(file, i + 1, version, width);
+    }
+    return { urls, sourcePages, version };
+  }
+
   await fs.mkdir(cacheDir, { recursive: true });
 
   let renderedCount = 0;
+  let skippedCount = 0;
+  const brotliTargets = [];
+
+  console.log(`[cache] ${file}: ${sourcePages} pages, eagerPageCount=${eagerPageCount}`);
+
+  const pageConcurrency = isRenderPoolAvailable() ? RENDER_POOL_SIZE : PDF_CACHE_PAGE_CONCURRENCY;
 
   await runWithConcurrency(
     Array.from({ length: sourcePages }, (_, index) => index + 1),
-    PDF_CACHE_PAGE_CONCURRENCY,
+    pageConcurrency,
     async pageNum => {
       const pageFilePath = getPdfPageCacheFilePath(file, version, pageNum);
       let cacheReady = false;
@@ -370,58 +429,99 @@ async function ensurePdfPageImageCache(file, pdfPath, { width = 1600, eagerPageC
         if (error.code !== 'ENOENT') throw error;
       }
 
-      if (!cacheReady && pageNum <= eagerPageCount) {
+      if (cacheReady) {
+        skippedCount++;
+      } else if (pageNum <= eagerPageCount) {
         try {
-          const buffer = await renderPdfPageToWebpBuffer(pdfPath, pageNum, width);
-          await fs.writeFile(pageFilePath, buffer);
+          const buffer = await renderPageForCache(pdfPath, pageNum, width);
+          await Bun.write(pageFilePath, buffer);
+          renderedCount++;
         } catch (renderErr) {
-          console.error(`[warmup] skip page ${pageNum} of ${file}: ${renderErr.message}`);
+          console.error(`[cache] skip page ${pageNum} of ${file}: ${renderErr.message}`);
           urls[pageNum - 1] = null;
           return;
         }
       }
 
       if (cacheReady || pageNum <= eagerPageCount) {
-        try {
-          await ensureBrotliSidecar(pageFilePath);
-        } catch (brErr) {
-          console.error(`[warmup] skip brotli ${file} p${pageNum}: ${brErr.message}`);
-        }
+        brotliTargets.push(pageFilePath);
       }
 
       urls[pageNum - 1] = buildPdfPageImageUrl(file, pageNum, version, width);
 
-      renderedCount += 1;
-      if (renderedCount % 10 === 0) {
-        await new Promise(r => setTimeout(r, 50));
+      if (renderedCount % 10 === 0 && renderedCount > 0) {
+        console.log(`[cache] ${file}: rendered ${renderedCount}/${sourcePages} pages`);
       }
     }
   );
 
+  const BROTLI_CONCURRENCY = Math.min(4, CPU_COUNT);
+  await runWithConcurrency(brotliTargets, BROTLI_CONCURRENCY, async pageFilePath => {
+    try {
+      await ensureBrotliSidecar(pageFilePath);
+    } catch (brErr) {
+      console.error(`[cache] skip brotli ${file} ${path.basename(pageFilePath)}: ${brErr.message}`);
+    }
+  });
+
+  console.log(`[cache] ${file}: done - rendered=${renderedCount}, skipped=${skippedCount}, total=${sourcePages}`);
   return { urls, sourcePages, version };
 }
 
+const backgroundRenderJobs = new Map();
+
 async function getPdfPageImageList(file, pdfPath) {
-  return ensurePdfPageImageCache(file, pdfPath, { width: 1600, eagerPageCount: 0 });
+  return ensurePdfPageImageCache(file, pdfPath, { width: 2400, eagerPageCount: 0 });
 }
 
-app.get('/api/health', (req, res) => {
-  res.json({
+async function startBackgroundRender(file, pdfPath) {
+  if (backgroundRenderJobs.has(file)) {
+    console.log(`[background-render] ${file} already in progress, skipping`);
+    return;
+  }
+  backgroundRenderJobs.set(file, { startedAt: Date.now(), pages: 0 });
+  console.log(`[background-render] ${file} starting...`);
+  try {
+    await ensurePdfPageImageCache(file, pdfPath, { width: 2400, eagerPageCount: Infinity });
+    console.log(`[background-render] ${file} done`);
+  } catch (err) {
+    console.error(`[background-render] ${file} failed:`, err.message);
+  } finally {
+    backgroundRenderJobs.delete(file);
+  }
+}
+
+async function handleHealth() {
+  const mem = getMemoryUsage();
+  return jsonResponse({
     success: true,
     status: 'ok',
     booksLoaded: booksCache.loaded,
     booksCount: booksCache.data.length,
     warmupDone: booksCache.warmupDone,
-    warmupRunning
+    warmupRunning,
+    backgroundRenders: Array.from(backgroundRenderJobs.keys()),
+    pageRetries: pageRetryJobs.size,
+    renderWorkers: {
+      size: RENDER_POOL_SIZE,
+      memory: getRenderWorkerMemory().map(w => `${formatBytes(w.rss || 0)}`)
+    },
+    memory: {
+      heapUsed: formatBytes(mem.heapUsed),
+      heapTotal: formatBytes(mem.heapTotal),
+      rss: formatBytes(mem.rss),
+      limit: formatBytes(MEMORY_LIMIT),
+      heapPercent: ((mem.heapUsed / MEMORY_LIMIT) * 100).toFixed(1) + '%'
+    }
   });
-});
+}
 
-app.get('/api/books', async (req, res) => {
+async function handleBooks(req) {
   try {
     ensureWarmup();
-    const forceRefresh = req.query.refresh === '1';
+    const forceRefresh = new URL(req.url).searchParams.get('refresh') === '1';
     const snapshot = getBooksSnapshot({ forceRefresh });
-    res.json({
+    return jsonResponse({
       success: true,
       data: snapshot.books,
       cached: !forceRefresh,
@@ -435,21 +535,40 @@ app.get('/api/books', async (req, res) => {
     });
   } catch (error) {
     console.error('[api/books] error:', error);
-    res.status(500).json({ success: false, message: '扫描书籍目录失败', error: sanitizeError(error) });
+    return jsonResponse({ success: false, message: '扫描书籍目录失败', error: sanitizeError(error) }, 500);
   }
-});
+}
 
-app.get('/api/file/pages', async (req, res) => {
+async function handleBookByName(req) {
   try {
-    const { file } = req.query;
+    ensureWarmup();
+    const { name } = req.params;
+    const snapshot = getBooksSnapshot();
+    const book = snapshot.books.find(b => {
+      const fileName = String(b.file || '').replace(/\.pdf$/i, '');
+      return fileName === name;
+    });
+    if (!book) {
+      return jsonResponse({ success: false, message: `未找到名为 "${name}" 的书籍` }, 404);
+    }
+    return jsonResponse({ success: true, data: book });
+  } catch (error) {
+    console.error('[api/books/by-name] error:', error);
+    return jsonResponse({ success: false, message: '查找书籍失败', error: sanitizeError(error) }, 500);
+  }
+}
+
+async function handleFilePages(req) {
+  try {
+    const file = new URL(req.url).searchParams.get('file');
     const resolved = await resolvePdfPath(file);
     if (resolved.error) {
-      return res.status(resolved.error.status).json({ success: false, message: resolved.error.message });
+      return jsonResponse({ success: false, message: resolved.error.message }, resolved.error.status);
     }
 
     const pdf = await loadPdfDocument(resolved.filePath);
     const sourcePages = pdf.numPages;
-    res.json({
+    return jsonResponse({
       success: true,
       data: {
         totalPages: sourcePages,
@@ -460,63 +579,51 @@ app.get('/api/file/pages', async (req, res) => {
     });
   } catch (error) {
     console.error('[api/file/pages] error:', error);
-    res.status(500).json({ success: false, message: '读取 PDF 页数失败', error: sanitizeError(error) });
+    return jsonResponse({ success: false, message: '读取 PDF 页数失败', error: sanitizeError(error) }, 500);
   }
-});
+}
 
-app.get('/api/file/extract', async (req, res) => {
+async function handleFilePageImage(req) {
   try {
-    const { file, page, pageSize } = req.query;
+    const params = new URL(req.url).searchParams;
+    const file = params.get('file');
+    const page = params.get('page');
+    const width = params.get('width');
     const resolved = await resolvePdfPath(file);
     if (resolved.error) {
-      return res.status(resolved.error.status).json({ success: false, message: resolved.error.message });
-    }
-
-    const pageNum = Number.parseInt(page, 10) || 1;
-    const pageSizeNum = Math.min(Math.max(Number.parseInt(pageSize, 10) || 10, 1), 100);
-    const result = await extractPdfText(resolved.filePath, pageNum, pageNum + pageSizeNum - 1);
-
-    res.json({ success: true, data: { ...result, type: 'pdf' } });
-  } catch (error) {
-    console.error('[api/file/extract] error:', error);
-    res.status(500).json({ success: false, message: '提取 PDF 文本失败', error: sanitizeError(error) });
-  }
-});
-
-app.get('/api/file/page-image', async (req, res) => {
-  try {
-    const { file, page, width } = req.query;
-    const resolved = await resolvePdfPath(file);
-    if (resolved.error) {
-      return res.status(resolved.error.status).json({ success: false, message: resolved.error.message });
+      return jsonResponse({ success: false, message: resolved.error.message }, resolved.error.status);
     }
 
     const pageNum = Math.max(Number.parseInt(page, 10) || 1, 1);
-    const targetWidth = Math.min(Math.max(Number.parseInt(width, 10) || 1600, 280), 2400);
+    const targetWidth = Math.min(Math.max(Number.parseInt(width, 10) || 2400, 280), 3200);
     const imageBuffer = await renderPdfPageToWebpBuffer(resolved.filePath, pageNum, targetWidth);
     const stat = await fs.stat(resolved.filePath);
     const version = getPdfRenderVersion(resolved.filePath, stat);
 
-    res.setHeader('Content-Type', 'image/webp');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.setHeader('ETag', `"${version}-${pageNum}-${targetWidth}"`);
-    res.send(imageBuffer);
+    return new Response(imageBuffer, {
+      headers: withCors({
+        'Content-Type': 'image/webp',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'ETag': `"${version}-${pageNum}-${targetWidth}"`
+      })
+    });
   } catch (error) {
     console.error('[api/file/page-image] error:', error);
-    res.status(500).json({ success: false, message: '生成 PDF 页面图片失败', error: sanitizeError(error) });
+    return jsonResponse({ success: false, message: '生成 PDF 页面图片失败', error: sanitizeError(error) }, 500);
   }
-});
+}
 
-app.get('/api/process', async (req, res) => {
+async function handleProcess(req) {
   try {
-    const { pdfPath } = req.query;
+    const pdfPath = new URL(req.url).searchParams.get('pdfPath');
     const resolved = await resolvePdfPath(pdfPath);
     if (resolved.error) {
-      return res.status(resolved.error.status).json({ success: false, message: resolved.error.message });
+      return jsonResponse({ success: false, message: resolved.error.message }, resolved.error.status);
     }
 
     const processed = await getPdfPageImageList(pdfPath, resolved.filePath);
-    res.json({
+    startBackgroundRender(pdfPath, resolved.filePath);
+    return jsonResponse({
       success: true,
       data: {
         urls: processed.urls,
@@ -527,12 +634,195 @@ app.get('/api/process', async (req, res) => {
     });
   } catch (error) {
     console.error('[api/process] error:', error);
-    res.status(500).json({ success: false, message: '生成 PDF 页面图片失败', error: sanitizeError(error) });
+    return jsonResponse({ success: false, message: '生成 PDF 页面图片失败', error: sanitizeError(error) }, 500);
+  }
+}
+
+async function serveStaticFile(rootDir, requestPath, headers = {}) {
+  let relativePath;
+  try {
+    relativePath = path.normalize(decodeURIComponent(requestPath || '/')).replace(/^([/\\])+/, '');
+  } catch {
+    return new Response(null, { status: 400, headers: withCors() });
+  }
+
+  const sourcePath = path.join(rootDir, relativePath);
+  const normalizedRoot = path.resolve(rootDir);
+  const normalizedSource = path.resolve(sourcePath);
+
+  if (!normalizedSource.startsWith(normalizedRoot)) {
+    return new Response(null, { status: 400, headers: withCors() });
+  }
+
+  const file = Bun.file(normalizedSource);
+  if (!(await file.exists())) {
+    return null;
+  }
+  return new Response(file, { headers: withCors(headers) });
+}
+
+const pageRetryJobs = new Map();
+
+async function findBookFileByCacheBaseName(baseName) {
+  try {
+    const files = await fs.readdir(BOOKS_DIR);
+    for (const file of files) {
+      if (!validateFileExt(file)) continue;
+      if (getPdfPageCacheBaseName(file) === baseName) {
+        return file;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+async function retryRenderSinglePage(baseName, version, pageNum) {
+  const retryKey = `${baseName}/${version}/${pageNum}`;
+  if (pageRetryJobs.has(retryKey)) {
+    return pageRetryJobs.get(retryKey);
+  }
+
+  const job = (async () => {
+    const file = await findBookFileByCacheBaseName(baseName);
+    if (!file) return null;
+
+    const resolved = await resolvePdfPath(file);
+    if (resolved.error) return null;
+
+    const stat = await fs.stat(resolved.filePath);
+    const currentVersion = getPdfRenderVersion(resolved.filePath, stat);
+    if (currentVersion !== version) {
+      console.warn(`[page-retry] ${file} version mismatch (requested=${version}, current=${currentVersion}), skip`);
+      return null;
+    }
+
+    console.log(`[page-retry] ${file} page ${pageNum}: re-rendering single page`);
+    const buffer = await renderPageForCache(resolved.filePath, pageNum, 2400);
+
+    const pageFilePath = getPdfPageCacheFilePath(file, version, pageNum);
+    await fs.mkdir(path.dirname(pageFilePath), { recursive: true });
+    await Bun.write(pageFilePath, buffer);
+    try {
+      await ensureBrotliSidecar(pageFilePath);
+    } catch (brErr) {
+      console.error(`[page-retry] brotli failed ${file} p${pageNum}: ${brErr.message}`);
+    }
+    console.log(`[page-retry] ${file} page ${pageNum}: done`);
+    return pageFilePath;
+  })()
+    .catch(err => {
+      console.error(`[page-retry] failed ${retryKey}:`, err.message);
+      return null;
+    })
+    .finally(() => {
+      pageRetryJobs.delete(retryKey);
+    });
+
+  pageRetryJobs.set(retryKey, job);
+  return job;
+}
+
+const PDF_PAGE_STATIC_HEADERS = {
+  'Content-Type': 'image/webp',
+  'Cache-Control': 'public, max-age=31536000, immutable',
+  'Vary': 'Accept-Encoding'
+};
+
+async function servePdfPageFile(requestPath, acceptEncoding) {
+  let relativePath;
+  try {
+    relativePath = path.normalize(decodeURIComponent(requestPath || '/')).replace(/^([/\\])+/, '');
+  } catch {
+    return new Response(null, { status: 400, headers: withCors() });
+  }
+
+  const sourcePath = path.join(PDF_PAGE_CACHE_DIR, relativePath);
+  const normalizedRoot = path.resolve(PDF_PAGE_CACHE_DIR);
+  const normalizedSource = path.resolve(sourcePath);
+
+  if (!normalizedSource.startsWith(normalizedRoot)) {
+    return new Response(null, { status: 400, headers: withCors() });
+  }
+
+  if (acceptEncoding.includes('br')) {
+    const compressedFile = Bun.file(`${normalizedSource}.br`);
+    if (await compressedFile.exists()) {
+      return new Response(compressedFile, {
+        headers: withCors({ ...PDF_PAGE_STATIC_HEADERS, 'Content-Encoding': 'br' })
+      });
+    }
+  }
+
+  const file = Bun.file(normalizedSource);
+  if (await file.exists()) {
+    return new Response(file, { headers: withCors(PDF_PAGE_STATIC_HEADERS) });
+  }
+
+  const retryMatch = relativePath.match(/^([^/]+)\/([^/]+)\/page-(\d+)\.webp$/);
+  if (retryMatch) {
+    const [, baseName, version, pageNumStr] = retryMatch;
+    const pageNum = Number.parseInt(pageNumStr, 10);
+    const retriedPath = await retryRenderSinglePage(baseName, version, pageNum);
+    if (retriedPath) {
+      if (acceptEncoding.includes('br')) {
+        const compressedFile = Bun.file(`${retriedPath}.br`);
+        if (await compressedFile.exists()) {
+          return new Response(compressedFile, {
+            headers: withCors({ ...PDF_PAGE_STATIC_HEADERS, 'Content-Encoding': 'br' })
+          });
+        }
+      }
+      const retriedFile = Bun.file(retriedPath);
+      if (await retriedFile.exists()) {
+        return new Response(retriedFile, { headers: withCors(PDF_PAGE_STATIC_HEADERS) });
+      }
+    }
+  }
+
+  return new Response('Not Found', { status: 404, headers: withCors() });
+}
+
+const server = Bun.serve({
+  port: PORT,
+  idleTimeout: 120,
+  routes: {
+    '/api/health': { GET: withLog(handleHealth) },
+    '/api/books': { GET: withLog(handleBooks) },
+    '/api/books/by-name/:name': { GET: withLog(handleBookByName) },
+    '/api/file/pages': { GET: withLog(handleFilePages) },
+    '/api/file/page-image': { GET: withLog(handleFilePageImage) },
+    '/api/process': { GET: withLog(handleProcess) }
+  },
+  async fetch(req) {
+    logRequest(req);
+    const url = new URL(req.url);
+    const pathname = url.pathname;
+
+    if (req.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: withCors() });
+    }
+
+    if (pathname.startsWith('/api/book-thumbs/')) {
+      const res = await serveStaticFile(
+        BOOK_THUMB_CACHE_DIR,
+        pathname.slice('/api/book-thumbs'.length),
+        { 'Cache-Control': 'public, max-age=31536000, immutable' }
+      );
+      if (res) return res;
+      return new Response('Not Found', { status: 404, headers: withCors() });
+    }
+
+    if (pathname.startsWith('/api/pdf-pages/')) {
+      const acceptEncoding = String(req.headers.get('accept-encoding') || '');
+      return servePdfPageFile(pathname.slice('/api/pdf-pages'.length), acceptEncoding);
+    }
+
+    const res = await serveStaticFile(path.join(__dirname, '../public'), pathname);
+    if (res) return res;
+    return new Response('Not Found', { status: 404, headers: withCors() });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`PDF Server running on http://localhost:${PORT}`);
-  console.log(`Books directory: ${BOOKS_DIR}`);
-  startBackgroundWarmup();
-});
+console.log(`PDF Server running on http://localhost:${server.port}`);
+console.log(`Books directory: ${BOOKS_DIR}`);
+startBackgroundWarmup();

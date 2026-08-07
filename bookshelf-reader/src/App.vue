@@ -45,7 +45,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, provide, watch, nextTick } from 'vue'
+import { ref, onMounted, provide, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import ReaderScene from './components/ReaderScene.vue'
 import { useBookReader, delay } from './composables/useBookReader'
 
@@ -77,11 +78,15 @@ const {
   fetchBooks,
   abortAllRequests,
   prepareBook,
-  resetBookState
+  resetBookState,
+  fetchBookByName
 } = readerState
 
 const readerRef = ref(null)
 const readerSessionKey = ref(0)
+
+const route = useRoute()
+const router = useRouter()
 
 async function openBook(book) {
   if (transitioning.value) return
@@ -97,10 +102,9 @@ async function openBook(book) {
     currentPage.value = 1
     scene.value = 'reader'
 
-    loadToc(book.file)
-
     await delay(OPEN_READER_INIT_DELAY)
     await prepareTask
+
     await readerRef.value?.initFlipbook()
     await delay(OPEN_MASK_RELEASE_DELAY)
     transitioning.value = false
@@ -135,6 +139,7 @@ async function closeBook() {
   resetBookState()
 
   transitioning.value = false
+  router.push('/')
   await delay(CLOSE_DESK_SETTLE_DELAY)
 }
 
@@ -155,14 +160,7 @@ async function retryLoad() {
 }
 
 onMounted(async () => {
-  try {
-    await fetchBooks()
-    if (books.value.length > 0) {
-      await openBook(books.value[0])
-    }
-  } catch (initError) {
-    console.warn('初始化阅读器失败:', initError)
-  }
+  await fetchBooks()
 })
 
 watch(
@@ -170,9 +168,28 @@ watch(
   async firstBookFile => {
     if (!firstBookFile) return
     if (currentBook.value?.file || scene.value !== 'desk' || transitioning.value) return
+    if (route.params.bookName) return
     await openBook(books.value[0])
   }
 )
+
+watch(() => route.params, async (params) => {
+  if (transitioning.value) return
+
+  const bookName = params.bookName
+  if (bookName) {
+    const book = await fetchBookByName(bookName)
+    if (book) {
+      await openBook(book)
+    } else {
+      router.replace('/')
+    }
+  } else {
+    if (scene.value === 'reader') {
+      await closeBook()
+    }
+  }
+}, { immediate: true })
 </script>
 
 <style scoped>
